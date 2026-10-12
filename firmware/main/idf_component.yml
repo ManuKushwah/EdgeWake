@@ -1,0 +1,4 @@
+dependencies:
+  idf: ">=5.3"
+  # TensorFlow Lite Micro with ESP-NN optimized int8 kernels for the ESP32-S3.
+  espressif/esp-tflite-micro: "^1.4.0"
