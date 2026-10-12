@@ -1,0 +1,82 @@
+{
+  "cpu_mhz": 240.0,
+  "layers": [
+    {
+      "layer": "conv0 10x4, 1->64, out 25x5",
+      "ops": 320000,
+      "reference": "conv input(8,8) filter 64x3x3x3, pad 0",
+      "cycles_pessimistic": 2031080
+    },
+    {
+      "layer": "dw1 3x3, 64 ch, 25x5",
+      "ops": 72000,
+      "reference": "depthwise input(18,18) filter 1x3x3x16, pad 0",
+      "cycles_pessimistic": 359719
+    },
+    {
+      "layer": "dw2 3x3, 64 ch, 25x5",
+      "ops": 72000,
+      "reference": "depthwise input(18,18) filter 1x3x3x16, pad 0",
+      "cycles_pessimistic": 359719
+    },
+    {
+      "layer": "dw3 3x3, 64 ch, 25x5",
+      "ops": 72000,
+      "reference": "depthwise input(18,18) filter 1x3x3x16, pad 0",
+      "cycles_pessimistic": 359719
+    },
+    {
+      "layer": "dw4 3x3, 64 ch, 25x5",
+      "ops": 72000,
+      "reference": "depthwise input(18,18) filter 1x3x3x16, pad 0",
+      "cycles_pessimistic": 359719
+    },
+    {
+      "layer": "pw1 1x1, 64->64, 25x5",
+      "ops": 512000,
+      "reference": "conv input(10,10) filter 64x1x1x64",
+      "cycles_pessimistic": 413760
+    },
+    {
+      "layer": "pw2 1x1, 64->64, 25x5",
+      "ops": 512000,
+      "reference": "conv input(10,10) filter 64x1x1x64",
+      "cycles_pessimistic": 413760
+    },
+    {
+      "layer": "pw3 1x1, 64->64, 25x5",
+      "ops": 512000,
+      "reference": "conv input(10,10) filter 64x1x1x64",
+      "cycles_pessimistic": 413760
+    },
+    {
+      "layer": "pw4 1x1, 64->64, 25x5",
+      "ops": 512000,
+      "reference": "conv input(10,10) filter 64x1x1x64",
+      "cycles_pessimistic": 413760
+    },
+    {
+      "layer": "avg pool 25x5, 64 ch",
+      "ops": 8000,
+      "reference": "avg pool input(16,16) filter 3x3, 16 ch",
+      "cycles_pessimistic": 33461
+    },
+    {
+      "layer": "fc 64->12",
+      "ops": 768,
+      "reference": "fully connected len 271, 3 ch",
+      "cycles_pessimistic": 1458
+    },
+    {
+      "layer": "softmax 12",
+      "ops": 12,
+      "reference": "softmax 8 x 32",
+      "cycles_pessimistic": 521
+    }
+  ],
+  "invoke_ms_estimate": [
+    14.2,
+    21.5
+  ],
+  "note": "Estimate from esp-nn README kernel benchmarks (ESP32-S3, 240 MHz). Not a measurement."
+}

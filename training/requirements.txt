@@ -1,0 +1,4 @@
+# Python 3.11-3.13. The C front-end library must be built first:
+#   cmake -S host -B host/build && cmake --build host/build
+tensorflow-cpu==2.21.0
+numpy>=1.26

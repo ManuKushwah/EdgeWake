@@ -1,0 +1,114 @@
+{
+  "quiet_room": {
+    "noise": "pink_noise.wav",
+    "noise_dbfs": -55,
+    "utterances": 58,
+    "keyword_utterances": 50,
+    "vad_on": {
+      "hit_rate": 0.94,
+      "wrong_label": 1,
+      "false_accepts_per_hour": 12.0,
+      "infer_slots": 14976,
+      "inferences": 2141,
+      "skipped_by_vad_pct": 85.7,
+      "gate_open_pct": 14.3,
+      "algorithmic_latency_ms": {
+        "median": -161.0,
+        "p90": -64.5,
+        "max": 5.8
+      }
+    },
+    "vad_off": {
+      "hit_rate": 0.94,
+      "wrong_label": 1,
+      "false_accepts_per_hour": 18.0,
+      "infer_slots": 14976,
+      "inferences": 14976,
+      "skipped_by_vad_pct": 0.0,
+      "gate_open_pct": 100.0,
+      "algorithmic_latency_ms": {
+        "median": -161.0,
+        "p90": -64.5,
+        "max": 5.8
+      }
+    },
+    "inference_reduction_pct": 85.7
+  },
+  "quiet_room_busy": {
+    "noise": "pink_noise.wav",
+    "noise_dbfs": -55,
+    "utterances": 105,
+    "keyword_utterances": 91,
+    "vad_on": {
+      "hit_rate": 0.9121,
+      "wrong_label": 5,
+      "false_accepts_per_hour": 6.0,
+      "infer_slots": 14976,
+      "inferences": 2966,
+      "skipped_by_vad_pct": 80.2,
+      "gate_open_pct": 19.8,
+      "algorithmic_latency_ms": {
+        "median": -185.5,
+        "p90": -44.3,
+        "max": 131.4
+      }
+    },
+    "vad_off": {
+      "hit_rate": 0.9231,
+      "wrong_label": 5,
+      "false_accepts_per_hour": 66.0,
+      "infer_slots": 14976,
+      "inferences": 14976,
+      "skipped_by_vad_pct": 0.0,
+      "gate_open_pct": 100.0,
+      "algorithmic_latency_ms": {
+        "median": -185.9,
+        "p90": -45.4,
+        "max": 131.4
+      }
+    },
+    "inference_reduction_pct": 80.2
+  },
+  "kitchen_tap": {
+    "noise": "running_tap.wav",
+    "noise_dbfs": -40,
+    "utterances": 58,
+    "keyword_utterances": 50,
+    "vad_on": {
+      "hit_rate": 0.9,
+      "wrong_label": 0,
+      "false_accepts_per_hour": 12.0,
+      "infer_slots": 14976,
+      "inferences": 1441,
+      "skipped_by_vad_pct": 90.4,
+      "gate_open_pct": 9.8,
+      "algorithmic_latency_ms": {
+        "median": -156.5,
+        "p90": -60.3,
+        "max": 45.8
+      }
+    },
+    "vad_off": {
+      "hit_rate": 0.94,
+      "wrong_label": 0,
+      "false_accepts_per_hour": 24.0,
+      "infer_slots": 14976,
+      "inferences": 14976,
+      "skipped_by_vad_pct": 0.0,
+      "gate_open_pct": 100.0,
+      "algorithmic_latency_ms": {
+        "median": -148.0,
+        "p90": -21.0,
+        "max": 743.2
+      }
+    },
+    "inference_reduction_pct": 90.4
+  },
+  "config": {
+    "minutes_per_scenario": 10.0,
+    "threshold": 0.8,
+    "infer_every_hops": 2,
+    "smooth_window": 3,
+    "refractory_hops": 50
+  }
+}
