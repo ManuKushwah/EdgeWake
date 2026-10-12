@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    name: Core DSP tests (ASan/UBSan, TSan) + front-end parity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run unit tests
+        run: |
+          # Sanitizer runtimes need the pre-6.5-kernel ASLR entropy.
+          sudo sysctl -w vm.mmap_rnd_bits=28
+          cmake -S host -B host/build
+          cmake --build host/build -j"$(nproc)"
+          ctest --test-dir host/build --output-on-failure
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: C front-end vs NumPy reference
+        run: |
+          pip install numpy
+          python training/test_frontend.py
+
+  firmware:
+    name: Firmware build (ESP32-S3, ESP-IDF v5.5)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: idf.py build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: firmware
+          command: idf.py build && idf.py size
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edgewake-firmware
+          path: |
+            firmware/build/edgewake.bin
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
