@@ -15,6 +15,7 @@
 typedef struct {
     uint32_t chunks;           /* 20 ms chunks pushed into the ring */
     uint32_t read_errors;      /* I2S reads that timed out / came up short */
+    uint32_t dma_overflows;    /* DMA buffers the driver discarded (capture task too late) */
     uint32_t dropped_samples;  /* ring overflow (consumer fell > 512 ms behind) */
     int32_t last_peak;         /* |peak| of the latest chunk, int16 units */
 } audio_stats_t;

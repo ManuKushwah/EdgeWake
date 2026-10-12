@@ -2,14 +2,11 @@
  * EdgeWake - always-on keyword spotting on the ESP32-S3.
  *
  * Boot sequence:
- *   NVS -> OTA state -> GPIO -> TFLM model + golden-vector check
- *   -> KWS task (core 1) -> audio capture task (core 0) -> health monitor
- *   -> Wi-Fi + MQTT telemetry (optional)
- *   -> if this is the first boot after an OTA: self-test, then confirm or
- *      roll back.
+ *   NVS -> OTA state -> GPIO -> TFLM model -> Wi-Fi + MQTT telemetry
+ *   (optional) -> KWS engine + golden self-test (model, on-device front-end,
+ *   end to end) -> KWS task (core 1) -> audio capture task (core 0) -> health
+ *   -> if this is the first boot after an OTA: confirm or roll back.
  */
-#include <stdlib.h>
-
 #include "actions.h"
 #include "app_config.h"
 #include "audio_capture.h"
@@ -30,26 +27,6 @@ static const char *TAG = "main";
 /* Detection events: KWS task -> telemetry task. Statically allocated. */
 static StaticQueue_t s_event_queue_mem;
 static uint8_t s_event_queue_storage[EW_EVENT_QUEUE_LEN * sizeof(kws_event_t)];
-
-/* Runs a known test-set clip through the model and compares with the scores
- * the reference int8 interpreter produced when the model was exported. Must
- * run before the KWS task starts (the interpreter is not re-entrant). */
-static bool golden_vector_ok(void)
-{
-    int8_t scores[EW_NUM_CLASSES];
-    if (inference_run(NULL, ew_golden_input, scores) != 0) {
-        return false;
-    }
-    int best = 0, max_diff = 0;
-    for (int c = 0; c < EW_NUM_CLASSES; c++) {
-        best = scores[c] > scores[best] ? c : best;
-        const int d = abs(scores[c] - ew_golden_scores[c]);
-        max_diff = d > max_diff ? d : max_diff;
-    }
-    ESP_LOGI(TAG, "golden vector: got \"%s\", expected \"%s\", max |dq| = %d", ew_labels[best],
-             ew_labels[ew_golden_class], max_diff);
-    return best == ew_golden_class && max_diff <= 2;
-}
 
 static bool wait_until(bool (*cond)(void), uint32_t timeout_ms)
 {
@@ -91,23 +68,25 @@ void app_main(void)
         ota_confirm(false, "model failed to load");  /* rolls back if this is an OTA boot */
         ESP_ERROR_CHECK(err);
     }
-    const bool golden_ok = golden_vector_ok();
 
+    /* Networking first, so the KWS task only gets an event queue if
+     * something will drain it. Both calls return immediately. */
     QueueHandle_t events = xQueueCreateStatic(EW_EVENT_QUEUE_LEN, sizeof(kws_event_t),
                                               s_event_queue_storage, &s_event_queue_mem);
+    const bool networked = wifi_start() == ESP_OK;
+    const bool telemetry_ok = networked && telemetry_start(events) == ESP_OK;
+    if (!networked) {
+        ESP_LOGW(TAG, "no Wi-Fi configured: running offline");
+    } else if (!telemetry_ok) {
+        ESP_LOGW(TAG, "telemetry not started (certificates / endpoint missing?)");
+    }
+
     audio_ring_init();
-    ESP_ERROR_CHECK(kws_task_start(&info, audio_ring(), events));
+    ESP_ERROR_CHECK(kws_task_init(&info, audio_ring(), telemetry_ok ? events : NULL));
+    const bool golden_ok = kws_self_test();  /* before the task owns the engine */
+    ESP_ERROR_CHECK(kws_task_start());
     ESP_ERROR_CHECK(audio_capture_start(kws_task_handle()));
     ESP_ERROR_CHECK(health_start());
-
-    const bool networked = wifi_start() == ESP_OK;
-    if (networked) {
-        if (telemetry_start(events) != ESP_OK) {
-            ESP_LOGW(TAG, "telemetry not started");
-        }
-    } else {
-        ESP_LOGW(TAG, "no Wi-Fi configured: running offline");
-    }
 
     if (ota_pending_verify()) {
         ESP_LOGW(TAG, "first boot of a new image: running self-test");
@@ -115,18 +94,24 @@ void app_main(void)
 #if CONFIG_EW_SELFTEST_FORCE_FAIL
         failure = "forced by CONFIG_EW_SELFTEST_FORCE_FAIL (rollback demo)";
         (void)golden_ok;
+        (void)telemetry_ok;
         (void)wait_until;
         (void)pipeline_running;
 #else
         if (!golden_ok) {
-            failure = "golden-vector inference mismatch";
+            failure = "golden self-test mismatch";
         } else if (!wait_until(audio_capture_is_alive, 3000)) {
             failure = "microphone silent";
         } else if (!wait_until(pipeline_running, 5000)) {
             failure = "KWS pipeline not running";
         } else if (networked && !wifi_wait_connected(30000)) {
-            /* An image that can't reach the network can't receive a fix. */
+            /* OTA arrives only over MQTT: an image that can't reach the
+             * broker can never receive the next fix. */
             failure = "Wi-Fi did not connect";
+        } else if (networked && !telemetry_ok) {
+            failure = "telemetry unavailable (certificates / endpoint)";
+        } else if (networked && !wait_until(telemetry_connected, 30000)) {
+            failure = "MQTT/TLS connection to AWS IoT failed";
         }
 #endif
         ota_confirm(failure == NULL, failure);

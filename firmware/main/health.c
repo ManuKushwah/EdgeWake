@@ -11,6 +11,7 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "ota.h"
+#include "telemetry.h"
 #include "wifi.h"
 
 static const char *TAG = "health";
@@ -109,6 +110,7 @@ void health_snapshot(health_t *h)
     h->stack_free_audio = audio_task_handle() ? uxTaskGetStackHighWaterMark(audio_task_handle()) : 0;
     h->stack_free_kws = kws_task_handle() ? uxTaskGetStackHighWaterMark(kws_task_handle()) : 0;
     h->rssi = wifi_rssi();
+    h->mqtt_dropped = telemetry_dropped();
     h->reset_reason = reset_reason_str(esp_reset_reason());
     h->fw_version = esp_app_get_description()->version;
     h->ota_state = ota_state_str();
@@ -120,21 +122,23 @@ int health_to_json(const health_t *h, char *buf, size_t len)
     return snprintf(buf, len,
         "{\"fw\":\"%s\",\"part\":\"%s\",\"ota\":\"%s\",\"reset\":\"%s\",\"up_s\":%lu,"
         "\"heap\":%lu,\"heap_min\":%lu,\"rssi\":%d,"
-        "\"audio\":{\"chunks\":%lu,\"read_err\":%lu,\"dropped\":%lu,\"peak\":%ld},"
-        "\"kws\":{\"hops\":%lu,\"slots\":%lu,\"inferences\":%lu,\"vad_skipped\":%lu,"
+        "\"audio\":{\"chunks\":%lu,\"read_err\":%lu,\"dma_overflows\":%lu,\"dropped\":%lu,\"peak\":%ld},"
+        "\"kws\":{\"hops\":%lu,\"slots\":%lu,\"inferences\":%lu,\"vad_skipped\":%lu,\"overload_skipped\":%lu,"
         "\"vad_skip_pct\":%.1f,\"detections\":%lu,\"errors\":%lu,\"vad\":%s,\"thr\":%.2f},"
         "\"timing\":{\"cpu_pct\":%.1f,\"infer_us_avg\":%lu,\"infer_us_max\":%lu,\"hop_us_max\":%lu},"
-        "\"stack_free\":{\"audio\":%lu,\"kws\":%lu},\"events_dropped\":%lu}",
+        "\"stack_free\":{\"audio\":%lu,\"kws\":%lu},\"events_dropped\":%lu,\"mqtt_dropped\":%lu}",
         h->fw_version, h->partition, h->ota_state, h->reset_reason, (unsigned long)h->uptime_s,
         (unsigned long)h->heap_free, (unsigned long)h->heap_min_free, h->rssi,
         (unsigned long)h->audio.chunks, (unsigned long)h->audio.read_errors,
+        (unsigned long)h->audio.dma_overflows,
         (unsigned long)h->audio.dropped_samples, (long)h->audio.last_peak,
         (unsigned long)h->kws.engine.hops, (unsigned long)h->kws.engine.infer_slots,
         (unsigned long)h->kws.engine.inferences, (unsigned long)h->kws.engine.skipped_by_vad,
+        (unsigned long)h->kws.engine.skipped_overload,
         (double)h->vad_skip_pct, (unsigned long)h->kws.engine.detections,
         (unsigned long)h->kws.engine.infer_errors, h->kws.vad_enabled ? "true" : "false",
         (double)h->kws.threshold, (double)h->kws_cpu_pct, (unsigned long)h->infer_us_avg,
         (unsigned long)h->kws.infer_us_max, (unsigned long)h->kws.hop_us_max,
         (unsigned long)h->stack_free_audio, (unsigned long)h->stack_free_kws,
-        (unsigned long)h->kws.events_dropped);
+        (unsigned long)h->kws.events_dropped, (unsigned long)h->mqtt_dropped);
 }

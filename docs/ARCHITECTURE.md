@@ -3,7 +3,7 @@
 ## Data path
 
 ```
- INMP441 ──I2S──► I2S0 + GDMA ──► 4 × 20 ms DMA buffers
+ INMP441 ──I2S──► I2S0 + GDMA ──► 6 × 20 ms DMA buffers
  (16 kHz,                              │  i2s_channel_read() unblocks once per 20 ms
   24-bit)                              ▼
                      ┌──────── core 0 ─────────┐
@@ -21,7 +21,7 @@
                      │  open:                  │
                      │   TFLM Invoke()         │  int8 DS-CNN, ESP-NN kernels
                      │   smooth 3 posteriors   │
-                     │   threshold+refractory  │
+                     │   ≥0.8, 1.5 s refractory│
                      └──┬───────────────┬──────┘
           GPIO action   │               │ xQueueSend(event, timeout 0)
           (LED / relay) ▼               ▼
@@ -48,9 +48,18 @@ Python training and evaluation code load with ctypes.
 
 ESP-IDF's own tasks for reference: IPC 24, Wi-Fi 23, esp_timer 22, LwIP 18 (all
 core 0 via `sdkconfig.defaults`). The audio task sits just below them: it does
-~20 µs of work per 20 ms, and four DMA buffers (80 ms) absorb any Wi-Fi burst
-that delays it. Core 1 runs only the kws task, so the CNN is never preempted by
-networking.
+~20 µs of work per 20 ms. Six DMA buffers absorb any Wi-Fi burst that
+delays it: the driver keeps one in flight, so 100 ms of completed audio can
+wait. If even that overflows, an IRAM-resident `on_recv_q_ovf` callback counts
+it (`audio.dma_overflows` in telemetry). The I2S ISR is IRAM-safe, so capture
+continues while flash is written during OTA. Core 1 runs only the kws task, so
+the CNN is never preempted by networking.
+
+**Load shedding.** If the kws task ever falls behind (a slower model,
+`INFER_EVERY_HOPS = 1`, the VAD switched off in constant noise), it doesn't
+starve the watchdog. With ≥ 4 hops waiting in the ring it keeps the front-end
+running but skips due inferences (`kws.overload_skipped`). Every 8 hops it
+feeds the watchdog and yields one tick so IDLE1 runs.
 
 **Why the ring buffer needs no lock.** The producer only writes `head`; the
 consumer only writes `tail`. Each side reads the other's index with *acquire*
@@ -75,7 +84,7 @@ and op resolver are placement-new'd into static storage.
 | `ew_kws_t` (MFCC tables, window, int8 feature ring, history) | 16.5 KB (16 520 B) |
 | TFLM tensor arena              | 40 KB (35,516 B used, logged at boot) |
 | model flatbuffer (flash, `.rodata`) | 45,992 B |
-| I2S DMA (driver-owned)         | 4 × 1280 B |
+| I2S DMA (driver-owned)         | 6 × 1280 B |
 | task stacks + TCBs             | 27 KB    |
 
 Wi-Fi, LwIP, mbedTLS and esp-mqtt use the heap, outside the audio path. Health
@@ -142,7 +151,11 @@ level. The threshold therefore scales with how much the background
 The statistics learn only from hops where the gate is fully closed, so speech
 and its hangover tail don't inflate them. While the gate is open, μ only
 drifts (α = 0.002), so a lasting level change is absorbed in about 7 s and the
-gate cannot stick open (`test_adapts_to_louder_background`). Hangover keeps
+gate cannot stick open (`test_adapts_to_louder_background`). All-zero hops (a MEMS mic
+outputs zeros while it starts up) are ignored by the statistics. During the
+0.5 s warm-up the statistics update on every hop at a fast rate, so they lock
+onto the room instead of latching the gate open
+(`test_startup_zeros_do_not_latch_gate`). Hangover keeps
 the gate open for 300 ms after the last speech hop, so trailing consonants and
 the tail of the 1 s window still get classified.
 
@@ -179,16 +192,22 @@ replaying 10-minute streams through the C engine on the host:
 
 ```
  running image (VALID) ── MQTT {"ota_url":"https://…"} ──► ota task
-     esp_https_ota_begin → read app descriptor → refuse same version
+     esp_https_ota_begin → read app descriptor → refuse the running version
+       and the version that was last rolled back (no download/fail loop)
      esp_https_ota_perform (chunks into the inactive slot, CA-verified HTTPS)
      esp_https_ota_finish → image checksum verified, otadata → new slot (state NEW)
      esp_restart()
  bootloader: NEW → PENDING_VERIFY, boot new slot
  app_main self-test:
-     golden vector: known test clip through TFLM, argmax + scores within ±2 LSB
+     golden self-test (runs every boot, before the kws task starts):
+       stored reference features → TFLM: scores within ±1 LSB of the PC
+       raw 1 s clip → on-device MFCC + quantizer: features within ±1, ≤ 2 % differ
+       on-device features → TFLM: same class
      microphone delivers a non-constant signal within 3 s
      ≥ 100 hops processed within 5 s
-     Wi-Fi connects within 30 s (if configured)
+     Wi-Fi connects and the MQTT/TLS session to AWS IoT is up within 30 s each
+       (OTA commands arrive only over MQTT, so an image without it can never
+        be updated again)
    pass → esp_ota_mark_app_valid_cancel_rollback()
    fail → esp_ota_mark_app_invalid_rollback_and_reboot()
           (if the API refuses because otadata has no record of another slot:
@@ -233,13 +252,47 @@ Partition table: `nvs`, `otadata`, `phy_init`, `ota_0` (1.875 MB), `ota_1`
 
 `firmware/tools/qemu_test.py boot` boots the release image on Espressif's
 QEMU `esp32s3` machine. It checks that the model loads, that the arena fits,
-that the golden vector produces bit-identical scores to the PC reference
-(Xtensa + ESP-NN vs TFLite reference kernels), and that the kws task starts on
-core 1. The first boot of the original 32 KB arena failed `AllocateTensors()`:
+and that the golden self-test passes: on the emulated Xtensa CPU with ESP-NN,
+the model's scores for the stored features are identical to TFLite's reference
+kernels on the PC (max |Δq| = 0, on a clip chosen so the scores aren't
+saturated), and the on-device MFCC + quantizer reproduce the PC's 490 int8
+features exactly. It also checks that the kws task starts on core 1. The first boot of the original 32 KB arena failed `AllocateTensors()`:
 ESP-NN's convolution scratch buffers needed 2.6 KB more than planned. The
 arena is now 40 KB with 35.5 KB used. QEMU doesn't model the I2S microphone,
 so after ~10 s the liveness monitor reboots the emulated chip, which also
 exercises that path.
+
+## Review fixes
+
+An independent code review (after the first version was complete) found
+these, all fixed and covered by tests where possible:
+
+| Issue | Fix |
+|---|---|
+| Telemetry loop compared tick counts with `>`. After the 32-bit tick wrap (49.7 days at 1 kHz) it busy-waited, starving IDLE0 → task-watchdog reboot | signed tick difference |
+| A kws task slower than real time never left its drain loop → watchdog reboot loop | load shedding + periodic yield (above) |
+| The post-OTA self-test checked Wi-Fi but not the MQTT session through which OTA arrives | require `telemetry_connected()` |
+| A rolled-back version could be re-installed by a retried command (download/fail loop) | compare with `esp_ota_get_last_invalid_partition()` |
+| The VAD seeded its background from the mic's start-up zeros → gate latched open ~20 s | ignore digital silence, fast warm-up statistics (`test_startup_zeros_do_not_latch_gate`) |
+| 256-byte URL and 1 KB MQTT buffer rejected S3 pre-signed URLs | 1 KB URL, 2 KB MQTT buffer, rejection reason in the reply |
+| I2S DMA overruns were invisible, and the slack was 60 ms, not the documented 80 | overflow callback + counter, 6 buffers, IRAM-safe ISR |
+| Re-enabling the VAD reused stale statistics | re-initialize on enable |
+| Offline/outbox-full message loss and OTA failures weren't reported | `mqtt_dropped`, `ota` state in health telemetry; no event queue when telemetry is off |
+
+Two review suggestions were tested on the stream replays before changing
+anything:
+- **Requiring 3 averaged posteriors before a detection** made no difference
+  on these streams. It's kept as protection against single transients.
+- **A 1 s refractory period let the tail of the same word re-trigger.**
+  Raising it to 1.5 s cut VAD-off false accepts from 66 to 30 per hour on the
+  busy stream, with no lost detections.
+
+The golden test was also strengthened. The first golden clip's scores were
+saturated (127 / −128), so "bit-identical" proved little. It now uses a
+non-saturated clip and also checks the on-device front-end from raw audio.
+
+A core-dump partition was also added, so a crash in the field leaves more
+than a reset reason.
 
 ## Timing probes (logic analyzer)
 

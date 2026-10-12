@@ -27,9 +27,12 @@ extern const char *const ew_labels[EW_NUM_CLASSES];
 extern const float ew_feat_mean[EW_NUM_MFCC];
 extern const float ew_feat_inv_std[EW_NUM_MFCC];
 
-/* Golden vector for the post-OTA self-test: one official test-set clip
- * ("on") quantized exactly as on the device, and the int8
- * scores the reference interpreter produced for it at export time. */
+/* Golden vector for the boot / post-OTA self-test: one official test-set
+ * clip ("on", chosen so its scores are not saturated), as raw
+ * PCM, as the int8 features the host build of ew_mfcc.c + ew_kws.c computes
+ * from it, and the int8 scores TFLite's reference kernels give for them. */
+#define EW_GOLDEN_PCM_LEN 16000
+extern const int16_t ew_golden_pcm[EW_GOLDEN_PCM_LEN];
 extern const int8_t ew_golden_input[EW_INPUT_SIZE];
 extern const int8_t ew_golden_scores[EW_NUM_CLASSES];
 extern const int ew_golden_class;

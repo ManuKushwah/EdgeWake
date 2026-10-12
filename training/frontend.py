@@ -44,7 +44,7 @@ class Frontend:
         lib.ew_py_num_frames.restype = ctypes.c_int
         lib.ew_py_kws_init.argtypes = [
             ctypes.c_float, ctypes.c_int, ctypes.c_float, ctypes.c_int, _f32p, _f32p,
-            ctypes.c_int, ctypes.c_int, ctypes.c_float, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_float, ctypes.c_int, ctypes.c_int,
             ctypes.c_int, ctypes.c_int, INFER_FN]
         lib.ew_py_kws_init.restype = ctypes.c_int
         lib.ew_py_kws_quantize.argtypes = [_f32p, ctypes.c_int, _i8p]
@@ -66,7 +66,7 @@ class Frontend:
         return out
 
     def kws_init(self, in_scale, in_zp, out_scale, out_zp, mean, inv_std, infer=None,
-                 infer_every_hops=2, smooth_window=3, threshold=0.8, refractory_hops=50,
+                 infer_every_hops=2, smooth_window=3, min_history=1, threshold=0.8, refractory_hops=50,
                  silence_index=0, unknown_index=1, vad_enabled=True):
         """Configures the streaming engine. `infer(input_int8[490]) -> scores_int8[12]`."""
         num_classes = self.num_classes
@@ -85,7 +85,7 @@ class Frontend:
         rc = self.lib.ew_py_kws_init(
             float(in_scale), int(in_zp), float(out_scale), int(out_zp),
             np.ascontiguousarray(mean, np.float32), np.ascontiguousarray(inv_std, np.float32),
-            infer_every_hops, smooth_window, float(threshold), refractory_hops,
+            infer_every_hops, smooth_window, min_history, float(threshold), refractory_hops,
             silence_index, unknown_index, int(vad_enabled), self._callback)
         if rc != 0:
             raise RuntimeError(f"ew_py_kws_init failed ({rc})")

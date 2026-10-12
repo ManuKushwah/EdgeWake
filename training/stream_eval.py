@@ -95,6 +95,9 @@ def main():
     ap.add_argument("--test", required=True)
     ap.add_argument("--minutes", type=float, default=10.0)
     ap.add_argument("--threshold", type=float, default=0.8)
+    ap.add_argument("--min-history", type=int, default=3)
+    ap.add_argument("--refractory-hops", type=int, default=75)
+    ap.add_argument("--out", default="stream_eval.json")
     ap.add_argument("--results", default=str(REPO / "training" / "results"))
     args = ap.parse_args()
 
@@ -116,7 +119,8 @@ def main():
                         "keyword_utterances": sum(e["label"] != UNKNOWN for e in events)}
         for vad in (True, False):
             fe.kws_init(q.in_scale, q.in_zp, q.out_scale, q.out_zp, mean, inv_std, infer=q,
-                        threshold=args.threshold, vad_enabled=vad)
+                        threshold=args.threshold, vad_enabled=vad, min_history=args.min_history,
+                        refractory_hops=args.refractory_hops)
             gate, ran, det, _ = fe.kws_run(stream)
             st = fe.kws_stats()
             hits, wrong, fa, n_kw, lat = score(det, events, hop_s)
@@ -145,8 +149,9 @@ def main():
         report[name]["inference_reduction_pct"] = round(100 * (1 - on / off), 1)
 
     report["config"] = {"minutes_per_scenario": args.minutes, "threshold": args.threshold,
-                        "infer_every_hops": 2, "smooth_window": 3, "refractory_hops": 50}
-    (results / "stream_eval.json").write_text(json.dumps(report, indent=2))
+                        "infer_every_hops": 2, "smooth_window": 3, "min_history": args.min_history,
+                        "refractory_hops": args.refractory_hops}
+    (results / args.out).write_text(json.dumps(report, indent=2))
 
 
 def load_feature_stats():

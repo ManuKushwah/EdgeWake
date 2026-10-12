@@ -18,7 +18,7 @@ static const char *TAG = "ota";
 
 static bool s_pending_verify;
 static const char *s_state = "unknown";
-static char s_url[256];
+static char s_url[1024];  /* S3 pre-signed URLs are long */
 static atomic_bool s_busy;
 static StaticTask_t s_tcb;
 static StackType_t s_stack[EW_STACK_OTA];
@@ -67,8 +67,14 @@ void ota_confirm(bool ok, const char *reason)
         return;
     }
     if (ok) {
-        ESP_LOGI(TAG, "self-test passed: marking image valid");
-        esp_ota_mark_app_valid_cancel_rollback();
+        const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+        if (err != ESP_OK) {
+            /* Still PENDING_VERIFY: the next reset would roll back. Say so. */
+            ESP_LOGE(TAG, "self-test passed but marking valid failed: %s", esp_err_to_name(err));
+            s_state = "confirm_failed";
+            return;
+        }
+        ESP_LOGI(TAG, "self-test passed: image marked valid");
         s_pending_verify = false;
         s_state = "valid";
     } else {
@@ -108,6 +114,16 @@ static esp_err_t run_update(void)
             ESP_LOGW(TAG, "image version %s already running", incoming.version);
             err = ESP_ERR_INVALID_VERSION;
         }
+        /* Don't re-install the version that just failed its self-test and was
+         * rolled back (a retried or retained command would otherwise loop:
+         * download, reboot, fail, roll back, repeat). */
+        const esp_partition_t *bad = esp_ota_get_last_invalid_partition();
+        esp_app_desc_t bad_desc;
+        if (err == ESP_OK && bad != NULL && esp_ota_get_partition_description(bad, &bad_desc) == ESP_OK &&
+            strcmp(incoming.version, bad_desc.version) == 0) {
+            ESP_LOGW(TAG, "image version %s was rolled back before; refusing", incoming.version);
+            err = ESP_ERR_INVALID_VERSION;
+        }
         while (err == ESP_OK && (err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
             /* Each call writes one chunk into the inactive slot. */
         }
@@ -137,6 +153,7 @@ static void ota_task(void *arg)
             esp_restart();
         }
         ESP_LOGE(TAG, "update failed: %s", esp_err_to_name(err));
+        s_state = (err == ESP_ERR_INVALID_VERSION) ? "update_refused_version" : "update_failed";
         atomic_store(&s_busy, false);
     }
 }

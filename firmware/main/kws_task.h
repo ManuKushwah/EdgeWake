@@ -37,9 +37,18 @@ typedef struct {
     float threshold;
 } kws_stats_t;
 
-/* Initializes the engine with the model's quantization parameters and
- * starts the task pinned to core 1. */
-esp_err_t kws_task_start(const inference_info_t *info, ew_ringbuf_t *ring, QueueHandle_t events);
+/* Initializes the engine with the model's quantization parameters.
+ * `events` may be NULL when telemetry isn't running. */
+esp_err_t kws_task_init(const inference_info_t *info, ew_ringbuf_t *ring, QueueHandle_t events);
+
+/* Golden-vector self-test: model scores, on-device front-end and end-to-end
+ * decision against references produced on the PC at export time. Call after
+ * kws_task_init() and before kws_task_start() (the interpreter and the MFCC
+ * state are not shared safely with a running task). */
+bool kws_self_test(void);
+
+/* Starts the task pinned to core 1. */
+esp_err_t kws_task_start(void);
 
 TaskHandle_t kws_task_handle(void);
 

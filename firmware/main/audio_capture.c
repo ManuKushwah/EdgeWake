@@ -39,6 +39,7 @@ static i2s_chan_handle_t s_rx;
 /* Written only by the capture task, read by others: relaxed atomics. */
 static _Atomic uint32_t s_chunks;
 static _Atomic uint32_t s_read_errors;
+static _Atomic uint32_t s_dma_overflows;
 static _Atomic int32_t s_last_peak;
 static _Atomic uint32_t s_last_active_ms;
 
@@ -50,6 +51,22 @@ void audio_ring_init(void)
 ew_ringbuf_t *audio_ring(void)
 {
     return &s_ring;
+}
+
+/* ISR context. The driver calls this when its queue of completed DMA buffers
+ * is full and it has to discard the oldest one, i.e. audio was lost before
+ * it ever reached the ring. IRAM-resident because CONFIG_I2S_ISR_IRAM_SAFE
+ * keeps the I2S ISR running while flash is being written. */
+static IRAM_ATTR bool on_dma_overflow(i2s_chan_handle_t handle, i2s_event_data_t *event, void *ctx)
+{
+    (void)handle;
+    (void)event;
+    (void)ctx;
+    /* Single writer (this ISR), so load + store suffices; avoids any atomic
+     * read-modify-write helper that might live in flash. */
+    const uint32_t n = atomic_load_explicit(&s_dma_overflows, memory_order_relaxed);
+    atomic_store_explicit(&s_dma_overflows, n + 1, memory_order_relaxed);
+    return false;  /* no higher-priority task was woken */
 }
 
 static esp_err_t i2s_init(void)
@@ -74,6 +91,10 @@ static esp_err_t i2s_init(void)
     };
     std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;  /* L/R pin tied to GND */
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_rx, &std_cfg), TAG, "init_std_mode");
+
+    /* Callbacks must be registered before the channel is enabled. */
+    const i2s_event_callbacks_t cbs = {.on_recv_q_ovf = on_dma_overflow};
+    ESP_RETURN_ON_ERROR(i2s_channel_register_event_callback(s_rx, &cbs, NULL), TAG, "callbacks");
     return i2s_channel_enable(s_rx);
 }
 
@@ -152,6 +173,7 @@ void audio_get_stats(audio_stats_t *out)
 {
     out->chunks = atomic_load_explicit(&s_chunks, memory_order_relaxed);
     out->read_errors = atomic_load_explicit(&s_read_errors, memory_order_relaxed);
+    out->dma_overflows = atomic_load_explicit(&s_dma_overflows, memory_order_relaxed);
     out->dropped_samples = ew_ringbuf_dropped(&s_ring);
     out->last_peak = atomic_load_explicit(&s_last_peak, memory_order_relaxed);
 }

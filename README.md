@@ -23,7 +23,7 @@ INMP441 ─I2S/DMA─► audio task (core 0) ─► lock-free SPSC ring ─► K
 
 ## Highlights
 
-* **Real-time audio path in C:** 16 kHz I2S with DMA (4 × 20 ms buffers) feeds
+* **Real-time audio path in C:** 16 kHz I2S with DMA (6 × 20 ms buffers) feeds
   a lock-free single-producer/single-consumer ring buffer (C11 acquire/release
   atomics). The producer runs on core 0 and the consumer on core 1, as
   priority-scheduled FreeRTOS tasks. Every buffer, task stack, queue and the
@@ -39,16 +39,18 @@ INMP441 ─I2S/DMA─► audio task (core 0) ─► lock-free SPSC ring ─► K
   Interpreter, resolver and arena are statically allocated; TFLM never uses the
   heap.
 * **Energy VAD gate:** the threshold adapts to the background level *and* its
-  variability, with hangover. It skips 80–90 % of CNN invocations on realistic
+  variability, with hangover. It skips 80–94 % of CNN invocations on realistic
   streams while the MFCC window keeps running, so no context is lost when
   speech starts.
 * **AWS IoT Core** over MQTT/TLS 1.2 with X.509 client certificates: detection
   events (QoS 1), periodic health (CPU load, heap, stack high-water marks, VAD
   skip rate, reset reason), LWT status, and runtime commands.
 * **A/B OTA with automatic rollback:** HTTPS download into the inactive slot,
-  then a first-boot self-test (golden-vector inference, mic alive, pipeline
-  running, network up). The image is confirmed only if the self-test passes;
-  otherwise the device rolls back. **Task watchdog** on every pipeline task,
+  then a first-boot self-test (a golden clip through the on-device MFCC,
+  quantizer and model, plus mic alive, pipeline running, and the MQTT
+  connection to AWS up). The image is confirmed only if the self-test passes;
+  otherwise the device rolls back. A version that was rolled back is refused if
+  offered again. **Task watchdog** on every pipeline task,
   plus a data-path liveness monitor.
 * **Logic-analyzer probes:** four GPIOs driven with single W1TS/W1TC register
   writes mark DMA chunks, per-hop DSP, `Invoke()` and actions.
@@ -89,13 +91,14 @@ reference kernels.
 
 Each scenario is a 10-minute replay through the firmware's streaming engine:
 a background track plus test-set utterances (keywords and unknown words)
-dropped in at random gaps.
+dropped in at random gaps. Decision settings as shipped: CNN every 40 ms,
+3-output average, threshold 0.8, 1.5 s refractory.
 
 | Scenario | CNN invocations skipped by VAD | Hit rate, VAD on / off | False accepts/h, VAD on / off |
 |----------|-----------------------------|------------------------|-------------------------------|
-| quiet room, a command every ~10 s | **85.7 %** | 94.0 % / 94.0 % | 12 / 18 |
-| quiet room, a command every ~5 s  | **80.2 %** | 91.2 % / 92.3 % | 6 / 66 |
-| running tap (−40 dBFS), every ~10 s | **90.4 %** | 90.0 % / 94.0 % | 12 / 24 |
+| quiet room, a command every ~10 s | **85.7 %** | 94.0 % / 94.0 % | 12 / 12 |
+| quiet room, a command every ~5 s  | **80.2 %** | 91.2 % / 92.3 % | 6 / 30 |
+| running tap (−40 dBFS), every ~10 s | **93.7 %** | 90.0 % / 94.0 % | 12 / 18 |
 
 **Algorithmic latency** runs from the end of the spoken word to the hop on
 which the engine fires. In the quiet room: median **−161 ms**, p90 −65 ms,
@@ -106,10 +109,10 @@ On the device, the compute time below adds on top.
 
 | | Value | Status |
 |---|---|---|
-| firmware image | 756 KB, 62 % of a 1.875 MB OTA slot free | measured (`idf.py size`) |
-| static internal RAM | 155 KB of 341 KB DIRAM | measured (`idf.py size`) |
+| firmware image | 786 KB, 59 % of a 1.875 MB OTA slot free | measured (`idf.py size`) |
+| static internal RAM | 168 KB of 341 KB DIRAM | measured (`idf.py size`) |
 | hot DSP loops in IRAM | `ew_rfft_power`, `ew_mfcc_compute`, `ew_vad_process`, ring read/write at `0x4037xxxx` | verified (ELF symbols) |
-| golden-vector inference on Xtensa + ESP-NN | bit-identical to the PC reference (max \|Δq\| = 0) | verified in QEMU |
+| golden self-test on Xtensa + ESP-NN | raw clip → on-device MFCC + quantizer: 0 of 490 features differ from the PC; model scores identical (max \|Δq\| = 0) on a non-saturated clip | verified in QEMU |
 | OTA rollback after a failed self-test | rolls back to the previous slot, including when otadata has no record of it | verified in QEMU |
 | `Invoke()` time | 14–22 ms at 240 MHz | estimate, from ESP-NN's published S3 kernel cycle counts (`training/estimate_latency.py`) |
 | keyword → GPIO | < 100 ms budget: algorithmic part measured above + compute | partly estimate |
@@ -127,6 +130,10 @@ On the device, the compute time below adds on top.
 * `firmware/tools/qemu_test.py boot | rollback`: the real firmware image on
   the emulated ESP32-S3.
 * CI builds the firmware for the ESP32-S3 on every push.
+* An independent code review found 9 issues, all fixed, including a
+  tick-counter wrap that would have spun the telemetry task after 49.7 days
+  and a VAD that could latch open after mic start-up. See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#review-fixes).
 
 ## Repository layout
 

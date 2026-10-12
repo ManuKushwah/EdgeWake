@@ -47,6 +47,7 @@ static ew_kws_config_t make_config(stub_model_t *m, bool vad)
     cfg.feat_inv_std = k_inv_std;
     cfg.infer_every_hops = 2;
     cfg.smooth_window = 3;
+    cfg.min_history = 3;
     cfg.detect_threshold = 0.8f;
     cfg.refractory_hops = 50;
     cfg.silence_index = 0;
@@ -185,6 +186,36 @@ static void test_vad_gates_inference(void)
            kws.stats.skipped_by_vad);
 }
 
+/* Load shedding: when the caller is behind, the front-end keeps running but
+ * due inferences are skipped and counted; nothing fires from stale history. */
+static void test_overload_skips_inference_not_frontend(void)
+{
+    stub_model_t model = {.hot_class = 5, .hot_prob = 0.95f};
+    ew_kws_config_t cfg = make_config(&model, false);
+    EW_CHECK(ew_kws_init(&kws, &cfg) == 0);
+    int16_t hop[EW_FRAME_HOP];
+    for (int h = 0; h < 200; h++) {
+        synth_clip(hop, EW_FRAME_HOP);
+        ew_kws_process_hop_ex(&kws, hop, NULL, false);
+    }
+    EW_CHECK(model.calls == 0);
+    EW_CHECK(kws.stats.detections == 0);
+    EW_CHECK(kws.stats.skipped_overload == kws.stats.infer_slots);
+    EW_CHECK(kws.feat_count == EW_NUM_FRAMES);  /* features kept flowing */
+
+    /* Once caught up, detection needs min_history fresh inferences. */
+    ew_kws_result_t r;
+    int first_hit = -1;
+    for (int h = 0; h < 20 && first_hit < 0; h++) {
+        synth_clip(hop, EW_FRAME_HOP);
+        ew_kws_process_hop_ex(&kws, hop, &r, true);
+        if (r.detected) {
+            first_hit = model.calls;
+        }
+    }
+    EW_CHECK(first_hit == (int)cfg.min_history);
+}
+
 static void test_rejects_bad_config(void)
 {
     stub_model_t model = {0};
@@ -193,6 +224,9 @@ static void test_rejects_bad_config(void)
     EW_CHECK(ew_kws_init(&kws, &cfg) != 0);
     cfg = make_config(&model, false);
     cfg.infer = NULL;
+    EW_CHECK(ew_kws_init(&kws, &cfg) != 0);
+    cfg = make_config(&model, false);
+    cfg.min_history = cfg.smooth_window + 1;
     EW_CHECK(ew_kws_init(&kws, &cfg) != 0);
 }
 
@@ -203,6 +237,7 @@ int main(void)
     EW_RUN(test_detection_and_refractory);
     EW_RUN(test_non_keywords_never_fire);
     EW_RUN(test_vad_gates_inference);
+    EW_RUN(test_overload_skips_inference_not_frontend);
     EW_RUN(test_rejects_bad_config);
     printf("    sizeof(ew_kws_t) = %zu bytes (static)\n", sizeof(ew_kws_t));
     return EW_TEST_RESULT();

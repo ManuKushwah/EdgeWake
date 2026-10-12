@@ -25,9 +25,10 @@ extern const char device_key[] asm("_binary_private_pem_key_start");
 static esp_mqtt_client_handle_t s_client;
 static QueueHandle_t s_events;
 static atomic_bool s_connected;
+static _Atomic uint32_t s_dropped;  /* messages lost: offline, or outbox full */
 static char s_uri[160];
 static char s_topic_det[96], s_topic_health[96], s_topic_status[96], s_topic_cmd[96];
-static char s_json[768];  /* used only by the telemetry task */
+static char s_json[1024]; /* used only by the telemetry task */
 
 static StaticTask_t s_tcb;
 static StackType_t s_stack[EW_STACK_TELEMETRY];
@@ -49,7 +50,11 @@ static void handle_command(const char *data, int len)
     const cJSON *thr = cJSON_GetObjectItem(root, "threshold");
     if (cJSON_IsString(url)) {
         const esp_err_t err = ota_start_update(url->valuestring);
-        publish_status(err == ESP_OK ? "{\"ota\":\"started\"}" : "{\"ota\":\"rejected\"}");
+        /* "accepted" only: success or failure of the download itself shows
+         * up later as the "ota" state in health telemetry. */
+        publish_status(err == ESP_OK                  ? "{\"ota\":\"accepted\"}"
+                       : err == ESP_ERR_INVALID_STATE ? "{\"ota\":\"rejected\",\"why\":\"busy or pending verify\"}"
+                                                      : "{\"ota\":\"rejected\",\"why\":\"url must be https, < 1024 chars\"}");
     }
     if (cJSON_IsBool(vad)) {
         kws_request_vad(cJSON_IsTrue(vad));
@@ -99,17 +104,27 @@ static void telemetry_task(void *arg)
     TickType_t next_health = xTaskGetTickCount() + period;
 
     for (;;) {
-        const TickType_t now = xTaskGetTickCount();
-        const TickType_t wait = (next_health > now) ? next_health - now : 0;
+        /* Tick counts wrap every 2^32 ticks (49.7 days at 1 kHz): compare
+         * with a signed difference, never with `>` on raw tick values, or the
+         * wait collapses to 0 and this loop spins until `now` wraps too. */
+        const int32_t remaining = (int32_t)(next_health - xTaskGetTickCount());
+        const TickType_t wait = remaining > 0 ? (TickType_t)remaining : 0;
         kws_event_t ev;
-        if (xQueueReceive(s_events, &ev, wait) == pdTRUE && atomic_load(&s_connected)) {
+        const bool got = xQueueReceive(s_events, &ev, wait) == pdTRUE;
+        if (got && !atomic_load(&s_connected)) {
+            atomic_fetch_add(&s_dropped, 1);  /* no store-and-forward yet */
+        } else if (got) {
             const int n = snprintf(s_json, sizeof(s_json),
                 "{\"seq\":%lu,\"kw\":\"%s\",\"score\":%.3f,\"t_ms\":%lu,\"hop_to_action_us\":%lu}",
                 (unsigned long)ev.seq, ew_labels[ev.class_index], (double)ev.score,
                 (unsigned long)ev.timestamp_ms, (unsigned long)ev.hop_to_action_us);
-            /* enqueue: copied into the outbox and sent by the MQTT task, so a
-             * slow network never blocks this task either. */
-            esp_mqtt_client_enqueue(s_client, s_topic_det, s_json, n, 1, 0, true);
+            /* enqueue copies the message into the client's outbox and the
+             * MQTT task does the socket/TLS work. It can still wait briefly
+             * on the client's lock (e.g. during a TLS reconnect), which is
+             * fine here: this task is not on the audio path. */
+            if (esp_mqtt_client_enqueue(s_client, s_topic_det, s_json, n, 1, 0, true) < 0) {
+                atomic_fetch_add(&s_dropped, 1);
+            }
         }
         if ((int32_t)(xTaskGetTickCount() - next_health) >= 0) {
             next_health += period;
@@ -117,8 +132,9 @@ static void telemetry_task(void *arg)
                 health_t h;
                 health_snapshot(&h);
                 const int n = health_to_json(&h, s_json, sizeof(s_json));
-                if (n > 0 && n < (int)sizeof(s_json)) {
-                    esp_mqtt_client_enqueue(s_client, s_topic_health, s_json, n, 0, 0, true);
+                if (n > 0 && n < (int)sizeof(s_json) &&
+                    esp_mqtt_client_enqueue(s_client, s_topic_health, s_json, n, 0, 0, true) < 0) {
+                    atomic_fetch_add(&s_dropped, 1);
                 }
             }
         }
@@ -150,6 +166,7 @@ esp_err_t telemetry_start(QueueHandle_t detection_events)
             .qos = 1,
         },
         .network.reconnect_timeout_ms = 5000,
+        .buffer.size = 2048,  /* one OTA command with a long pre-signed URL fits unfragmented */
     };
     s_client = esp_mqtt_client_init(&cfg);
     if (s_client == NULL) {
@@ -169,6 +186,11 @@ bool telemetry_connected(void)
     return atomic_load(&s_connected);
 }
 
+uint32_t telemetry_dropped(void)
+{
+    return atomic_load(&s_dropped);
+}
+
 #else /* !EW_HAVE_CERTS */
 
 esp_err_t telemetry_start(QueueHandle_t detection_events)
@@ -181,6 +203,11 @@ esp_err_t telemetry_start(QueueHandle_t detection_events)
 bool telemetry_connected(void)
 {
     return false;
+}
+
+uint32_t telemetry_dropped(void)
+{
+    return 0;
 }
 
 #endif

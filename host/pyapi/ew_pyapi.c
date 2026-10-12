@@ -62,7 +62,7 @@ int ew_py_mfcc_batch(const int16_t *pcm, int n_clips, int clip_len, float *out)
 
 int ew_py_kws_init(float in_scale, int in_zp, float out_scale, int out_zp,
                    const float *mean, const float *inv_std,
-                   int infer_every_hops, int smooth_window, float threshold,
+                   int infer_every_hops, int smooth_window, int min_history, float threshold,
                    int refractory_hops, int silence_index, int unknown_index,
                    int vad_enabled, ew_infer_fn infer)
 {
@@ -79,6 +79,7 @@ int ew_py_kws_init(float in_scale, int in_zp, float out_scale, int out_zp,
     cfg.feat_inv_std = g_inv_std;
     cfg.infer_every_hops = (uint32_t)infer_every_hops;
     cfg.smooth_window = (uint32_t)smooth_window;
+    cfg.min_history = (uint32_t)min_history;
     cfg.detect_threshold = threshold;
     cfg.refractory_hops = (uint32_t)refractory_hops;
     cfg.silence_index = silence_index;

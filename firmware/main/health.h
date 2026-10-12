@@ -25,6 +25,7 @@ typedef struct {
     uint32_t stack_free_audio;  /* bytes never touched (high-water mark) */
     uint32_t stack_free_kws;
     int rssi;
+    uint32_t mqtt_dropped;
     const char *reset_reason;
     const char *fw_version;
     const char *ota_state;

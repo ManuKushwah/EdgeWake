@@ -50,7 +50,7 @@ the same image booted in QEMU (`python tools/qemu_test.py boot`):
 main: EdgeWake 1.0.0 (ESP-IDF v5.5.5)
 ota: running ota_0 @ 0x020000, fw 1.0.0, state valid
 infer: model 45992 B, arena used 35516 / 40960 B, in q=(0.04952,10) out q=(0.00391,-128)
-main: golden vector: got "on", expected "on", max |dq| = 0
+kws: self-test: model "on" (expected "on") max |dq| = 0; front-end 0/490 features differ (max 0); end-to-end "on"
 kws: running on core 1
 audio: I2S @ 16000 Hz, 4 x 320-sample DMA buffers, ring 8192 samples
 ```
@@ -113,7 +113,8 @@ digital one), and measure from the end of the word envelope to the LED edge.
 
 **Audio cadence and jitter.** Period of the AUDIO probe rising edges (should
 be 20.000 ms), with and without Wi-Fi traffic. WS on GPIO 6 should read
-16.000 kHz.
+16.000 kHz. `audio.dma_overflows` and `audio.dropped` in health telemetry must
+stay at 0, including during an OTA download.
 
 ## OTA rollback demo
 

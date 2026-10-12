@@ -23,6 +23,13 @@ CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
 CONFIG_ESP_INT_WDT=y
 CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+# Save a core dump of the crashed state to flash (read with `idf.py coredump-info`).
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# Audio keeps flowing while flash is written (OTA, NVS): the I2S/GDMA ISR and
+# our overflow callback run from IRAM even with the flash cache disabled.
+CONFIG_I2S_ISR_IRAM_SAFE=y
 
 # Keep networking on core 0 so core 1 is dedicated to the DSP/ML pipeline.
 CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0=y

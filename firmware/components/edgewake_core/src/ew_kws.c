@@ -9,7 +9,8 @@ int ew_kws_init(ew_kws_t *k, const ew_kws_config_t *cfg)
 {
     if (cfg == NULL || cfg->infer == NULL || cfg->input_scale <= 0.0f ||
         cfg->output_scale <= 0.0f || cfg->infer_every_hops == 0 ||
-        cfg->smooth_window == 0 || cfg->smooth_window > EW_KWS_MAX_SMOOTH) {
+        cfg->smooth_window == 0 || cfg->smooth_window > EW_KWS_MAX_SMOOTH ||
+        cfg->min_history == 0 || cfg->min_history > cfg->smooth_window) {
         return -1;
     }
     memset(k, 0, sizeof(*k));
@@ -87,7 +88,8 @@ static void run_inference(ew_kws_t *k, ew_kws_result_t *res)
     res->top_score = best_score;
 
     const bool is_keyword = best != k->cfg.silence_index && best != k->cfg.unknown_index;
-    if (is_keyword && best_score >= k->cfg.detect_threshold && k->refractory_left == 0) {
+    if (is_keyword && best_score >= k->cfg.detect_threshold && k->refractory_left == 0 &&
+        k->hist_count >= k->cfg.min_history) {
         res->detected = true;
         k->stats.detections++;
         k->refractory_left = k->cfg.refractory_hops;
@@ -97,6 +99,11 @@ static void run_inference(ew_kws_t *k, ew_kws_result_t *res)
 }
 
 void ew_kws_process_hop(ew_kws_t *k, const int16_t *hop, ew_kws_result_t *out)
+{
+    ew_kws_process_hop_ex(k, hop, out, true);
+}
+
+void ew_kws_process_hop_ex(ew_kws_t *k, const int16_t *hop, ew_kws_result_t *out, bool allow_infer)
 {
     ew_kws_result_t res = {0};
     res.top_class = -1;
@@ -131,11 +138,15 @@ void ew_kws_process_hop(ew_kws_t *k, const int16_t *hop, ew_kws_result_t *out)
     /* 4./5. Gated, strided inference. */
     if (k->feat_count == EW_NUM_FRAMES && (k->stats.hops % k->cfg.infer_every_hops) == 0) {
         k->stats.infer_slots++;
-        if (res.vad_active) {
+        if (res.vad_active && allow_infer) {
             run_inference(k, &res);
         } else {
-            k->stats.skipped_by_vad++;
-            k->hist_count = 0;  /* posteriors from before the silence are stale */
+            if (!res.vad_active) {
+                k->stats.skipped_by_vad++;
+            } else {
+                k->stats.skipped_overload++;
+            }
+            k->hist_count = 0;  /* posteriors from before the gap are stale */
             k->hist_pos = 0;
         }
     }

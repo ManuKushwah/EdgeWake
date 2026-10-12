@@ -10,6 +10,7 @@ void ew_vad_default_config(ew_vad_config_t *cfg)
     cfg->min_margin_db = 6.0f;     /* at least 4x the background energy */
     cfg->abs_min_db = 30.0f;       /* E = 1000 LSB^2, ~ -60 dBFS RMS */
     cfg->noise_alpha = 0.05f;      /* ~20 hops = 0.4 s memory */
+    cfg->warmup_alpha = 0.2f;      /* settle within the 0.5 s warm-up */
     cfg->drift_alpha = 0.002f;     /* a +12 dB step is absorbed in ~7 s */
     cfg->hangover_hops = 15;       /* 300 ms */
     cfg->warmup_hops = 25;         /* 500 ms */
@@ -42,22 +43,28 @@ EW_IRAM float ew_vad_energy(const int16_t *x, size_t n)
 
 EW_IRAM bool ew_vad_process(ew_vad_t *v, const int16_t *x, size_t n)
 {
-    const float level = 10.0f * log10f(ew_vad_energy(x, n) + 1.0f);
+    const float energy = ew_vad_energy(x, n);
+    const float level = 10.0f * log10f(energy + 1.0f);
+    const bool digital_silence = energy < 1.0f;  /* all-zero hop: mic not running */
+    const bool warming_up = v->hops_seen < v->cfg.warmup_hops;
     v->last_db = level;
-    if (!v->seeded) {
+    if (!v->seeded && !digital_silence) {
         v->mu_db = level;
         v->seeded = true;
     }
 
     const float spread = v->cfg.k_sigma * sqrtf(v->var_db);
     const float threshold = v->mu_db + (spread > v->cfg.min_margin_db ? spread : v->cfg.min_margin_db);
-    const bool speech = (level > threshold) && (level > v->cfg.abs_min_db);
+    const bool speech = v->seeded && (level > threshold) && (level > v->cfg.abs_min_db);
 
-    if (!speech && v->hangover_left == 0) {
-        /* Gate closed: this hop is background, learn from it. */
+    if (digital_silence) {
+        /* No information about the room: leave the statistics alone. */
+    } else if (warming_up || (!speech && v->hangover_left == 0)) {
+        /* Gate closed (or still settling): this hop is background, learn from it. */
+        const float alpha = warming_up ? v->cfg.warmup_alpha : v->cfg.noise_alpha;
         const float d = level - v->mu_db;
-        v->mu_db += v->cfg.noise_alpha * d;
-        v->var_db += v->cfg.noise_alpha * (d * d - v->var_db);
+        v->mu_db += alpha * d;
+        v->var_db += alpha * (d * d - v->var_db);
     } else {
         /* Gate open: only drift, so the gate cannot lock open forever. */
         v->mu_db += v->cfg.drift_alpha * (level - v->mu_db);
@@ -73,7 +80,7 @@ EW_IRAM bool ew_vad_process(ew_vad_t *v, const int16_t *x, size_t n)
         v->active = false;
     }
 
-    if (v->hops_seen < v->cfg.warmup_hops) {
+    if (warming_up) {
         v->hops_seen++;
         v->active = true;
     }

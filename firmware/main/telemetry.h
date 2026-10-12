@@ -12,6 +12,7 @@
 #define TELEMETRY_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -20,5 +21,8 @@
 /* Returns ESP_ERR_NOT_SUPPORTED when built without certificates or endpoint. */
 esp_err_t telemetry_start(QueueHandle_t detection_events);
 bool telemetry_connected(void);
+
+/* Messages lost because MQTT was disconnected or the outbox was full. */
+uint32_t telemetry_dropped(void);
 
 #endif /* TELEMETRY_H */

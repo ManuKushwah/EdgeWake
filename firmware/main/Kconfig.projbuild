@@ -69,33 +69,43 @@ menu "EdgeWake"
         config EW_REFRACTORY_MS
             int "Refractory period after a detection (ms)"
             range 0 5000
-            default 1000
+            default 1500
+            help
+                Must be longer than the 1 s model window: the model often fires
+                before a word ends, so with a 1 s refractory the tail of the same
+                word could trigger again (seen in host stream replays).
     endmenu
 
     menu "Actions and debug"
         config EW_LED_GPIO
             int "LED GPIO (keywords 'on' / 'off')"
+            range 0 48
             default 2
         config EW_AUX_GPIO
             int "Auxiliary output GPIO, e.g. a relay (keywords 'go' / 'stop')"
+            range 0 48
             default 1
         config EW_DEBUG_PROBES
             bool "Drive GPIO probe pins for logic-analyzer timing"
             default y
         config EW_PROBE_AUDIO_GPIO
             int "Probe: high while a DMA chunk is pushed into the ring"
+            range 0 48
             depends on EW_DEBUG_PROBES
             default 15
         config EW_PROBE_DSP_GPIO
             int "Probe: high while a hop is processed (VAD + MFCC + CNN)"
+            range 0 48
             depends on EW_DEBUG_PROBES
             default 16
         config EW_PROBE_INFER_GPIO
             int "Probe: high during TFLite Micro Invoke()"
+            range 0 48
             depends on EW_DEBUG_PROBES
             default 17
         config EW_PROBE_ACTION_GPIO
             int "Probe: pulses when a keyword action fires"
+            range 0 48
             depends on EW_DEBUG_PROBES
             default 18
         config EW_SELFTEST_FORCE_FAIL

@@ -21,7 +21,7 @@
     "vad_off": {
       "hit_rate": 0.94,
       "wrong_label": 1,
-      "false_accepts_per_hour": 18.0,
+      "false_accepts_per_hour": 12.0,
       "infer_slots": 14976,
       "inferences": 14976,
       "skipped_by_vad_pct": 0.0,
@@ -56,7 +56,7 @@
     "vad_off": {
       "hit_rate": 0.9231,
       "wrong_label": 5,
-      "false_accepts_per_hour": 66.0,
+      "false_accepts_per_hour": 30.0,
       "infer_slots": 14976,
       "inferences": 14976,
       "skipped_by_vad_pct": 0.0,
@@ -79,9 +79,9 @@
       "wrong_label": 0,
       "false_accepts_per_hour": 12.0,
       "infer_slots": 14976,
-      "inferences": 1441,
-      "skipped_by_vad_pct": 90.4,
-      "gate_open_pct": 9.8,
+      "inferences": 947,
+      "skipped_by_vad_pct": 93.7,
+      "gate_open_pct": 6.4,
       "algorithmic_latency_ms": {
         "median": -156.5,
         "p90": -60.3,
@@ -91,7 +91,7 @@
     "vad_off": {
       "hit_rate": 0.94,
       "wrong_label": 0,
-      "false_accepts_per_hour": 24.0,
+      "false_accepts_per_hour": 18.0,
       "infer_slots": 14976,
       "inferences": 14976,
       "skipped_by_vad_pct": 0.0,
@@ -102,13 +102,14 @@
         "max": 743.2
       }
     },
-    "inference_reduction_pct": 90.4
+    "inference_reduction_pct": 93.7
   },
   "config": {
     "minutes_per_scenario": 10.0,
     "threshold": 0.8,
     "infer_every_hops": 2,
     "smooth_window": 3,
-    "refractory_hops": 50
+    "min_history": 3,
+    "refractory_hops": 75
   }
 }

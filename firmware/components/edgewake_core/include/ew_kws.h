@@ -53,6 +53,9 @@ typedef struct {
 
     uint32_t infer_every_hops;   /* 2 -> one inference per 40 ms */
     uint32_t smooth_window;      /* posteriors averaged, 1..EW_KWS_MAX_SMOOTH */
+    uint32_t min_history;        /* posteriors needed before a detection may fire
+                                  * (1..smooth_window); stops one transient
+                                  * inference right after a reset from firing */
     float detect_threshold;      /* on the averaged probability, 0..1 */
     uint32_t refractory_hops;    /* no re-trigger for this long after a hit */
     int silence_index;           /* classes that are never "keywords" */
@@ -78,6 +81,7 @@ typedef struct {
     uint32_t infer_slots;     /* hops on which an inference was due */
     uint32_t inferences;      /* slots where the CNN actually ran */
     uint32_t skipped_by_vad;  /* slots skipped because the gate was closed */
+    uint32_t skipped_overload;/* slots skipped because the caller was behind */
     uint32_t detections;
     uint32_t infer_errors;
 } ew_kws_stats_t;
@@ -112,6 +116,12 @@ int ew_kws_init(ew_kws_t *k, const ew_kws_config_t *cfg);
 
 /* hop: exactly EW_FRAME_HOP samples. `out` may be NULL. */
 void ew_kws_process_hop(ew_kws_t *k, const int16_t *hop, ew_kws_result_t *out);
+
+/* Same, but lets the caller shed load: with allow_infer = false the front-end
+ * (window, MFCC, VAD) still advances so no context is lost, while a due
+ * inference is skipped and counted in stats.skipped_overload. Used when the
+ * audio backlog shows the task is falling behind real time. */
+void ew_kws_process_hop_ex(ew_kws_t *k, const int16_t *hop, ew_kws_result_t *out, bool allow_infer);
 
 /* Quantizes one MFCC frame with the folded normalisation (exposed for tests
  * and for the OTA self-test). */

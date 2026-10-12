@@ -18,6 +18,12 @@
  * drifts slowly toward the input; a lasting level change (a fan switching
  * on) is therefore absorbed within seconds and the gate cannot stick open.
  *
+ * Exactly-zero input (a MEMS mic outputs zeros while it starts up) carries
+ * no information about the room and is ignored by the
+ * statistics; seeding the background from it would latch the gate open for
+ * tens of seconds once real noise arrives. During warm-up the statistics are
+ * updated on every hop with a fast rate so they lock onto the room quickly.
+ *
  * Hangover keeps the gate open after the last speech hop: the model looks at
  * a 1 s window, so the keyword is still inside that window after the speaker
  * stops, and trailing low-energy phonemes ("-p" in "stop") must not be cut.
@@ -38,6 +44,7 @@ typedef struct {
     float min_margin_db;      /* never closer than this to the background */
     float abs_min_db;         /* ignore anything quieter (dB re 1 LSB^2) */
     float noise_alpha;        /* background statistics update rate (gate closed) */
+    float warmup_alpha;       /* faster update rate used during warm-up */
     float drift_alpha;        /* slow drift of mu while the gate is open */
     uint32_t hangover_hops;   /* keep gate open this many hops after speech */
     uint32_t warmup_hops;     /* gate forced open while the statistics settle */

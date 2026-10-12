@@ -105,7 +105,9 @@ def main():
     if args.mode == "boot":
         ok = expect_in_order(log, [
             r"infer: model \d+ B, arena used \d+ / \d+ B",
-            r'main: golden vector: got "(\w+)", expected "\1", max \|dq\| = [012]\b',
+            # model scores, on-device MFCC + quantizer, and end-to-end decision
+            r'kws: self-test: model "(\w+)" \(expected "\1"\) max \|dq\| = [01]; '
+            r'front-end \d+/490 features differ \(max [01]\); end-to-end "\1"',
             r"kws: running on core 1",
         ])
     else:

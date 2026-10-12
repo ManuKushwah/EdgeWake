@@ -100,6 +100,29 @@ static void test_fluctuating_background_stays_closed(void)
     EW_CHECK(ew_vad_process(&v, x, EW_FRAME_HOP));
 }
 
+/* Regression (code review): a mic that outputs exact zeros while it starts up
+ * must not seed the background estimate, or the gate latches open for tens
+ * of seconds once the real room noise arrives. */
+static void test_startup_zeros_do_not_latch_gate(void)
+{
+    ew_vad_config_t cfg;
+    ew_vad_default_config(&cfg);
+    ew_vad_t v;
+    ew_vad_init(&v, &cfg);
+    int16_t x[EW_FRAME_HOP] = {0};
+    for (int i = 0; i < 15; i++) {  /* 300 ms of digital silence */
+        ew_vad_process(&v, x, EW_FRAME_HOP);
+    }
+    int open_after_warmup = 0;
+    for (int i = 15; i < 15 + 500; i++) {  /* then 10 s of steady ~40 dB room noise */
+        make_noise(x, 250);
+        const bool open = ew_vad_process(&v, x, EW_FRAME_HOP);
+        open_after_warmup += open && i >= (int)cfg.warmup_hops;
+    }
+    printf("    open %d hops after warm-up\n", open_after_warmup);
+    EW_CHECK(open_after_warmup <= 20);
+}
+
 static void test_adapts_to_louder_background(void)
 {
     ew_vad_config_t cfg;
@@ -131,6 +154,7 @@ int main(void)
     EW_RUN(test_closes_on_steady_noise_and_opens_on_speech);
     EW_RUN(test_ignores_quiet_sounds_below_absolute_floor);
     EW_RUN(test_fluctuating_background_stays_closed);
+    EW_RUN(test_startup_zeros_do_not_latch_gate);
     EW_RUN(test_adapts_to_louder_background);
     return EW_TEST_RESULT();
 }
