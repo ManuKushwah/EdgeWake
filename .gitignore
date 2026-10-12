@@ -1,0 +1,21 @@
+# ESP-IDF build output
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+
+# Device credentials are never committed (see firmware/main/certs/README.md)
+firmware/main/certs/*.pem
+firmware/main/certs/*.crt
+firmware/main/certs/*.key
+
+# Host build
+host/build/
+
+# Python / training artifacts
+__pycache__/
+*.pyc
+.venv/
+training/runs/
+training/cache/
+*.npz
